@@ -1,29 +1,79 @@
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use std::str::from_utf8;
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    print!("{}", "123");
+use actix::{Actor, StreamHandler};
+use actix_web::{
+    get, middleware::Logger, post, web, App, Error, HttpRequest, HttpResponse, HttpServer,
+    Responder,
+};
+use actix_web_actors::ws;
 
-    HttpResponse::Ok().body("Hello world! 123")
+use log::info;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+struct MyWs;
+
+impl Actor for MyWs {
+    type Context = ws::WebsocketContext<Self>;
 }
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CustomMessage {
+    pub event: String,
+    pub payload: serde_json::Value,
 }
 
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
+/// Handler for ws::Message message
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWs {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        match msg {
+            Ok(ws::Message::Text(text)) => {
+                let msg_bytes = text.clone().into_bytes();
+                match from_utf8(&msg_bytes) {
+                    Ok(s) => {
+                        println!("Result: {}", json!(s));
+                    }
+                    Err(e) => {
+                        println!("Error: {:?}", e);
+                    }
+                }
+                ctx.text(text)
+            }
+
+            _ => (),
+        }
+    }
+}
+
+async fn index(req: HttpRequest, payload: web::Payload) -> Result<HttpResponse, Error> {
+    let resp = ws::start(MyWs {}, &req, payload);
+    resp
+}
+
+#[post("/{token}")]
+async fn push(path: web::Path<(String,)>) -> HttpResponse {
+    let token = path.into_inner().0;
+
+    info!("{}", token);
+
+    HttpResponse::Ok().body(format!("User detail"))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    //TODO: Create the logging config  for stdout in here
+    std::env::set_var("RUST_LOG", "info");
+    std::env::set_var("RUST_BACKTRACE", "1");
+    env_logger::init();
+
+    log::info!("Starting HTTP server at http://localhost:8080");
+
     HttpServer::new(|| {
+        let logger = Logger::default();
+
         App::new()
-            .service(hello)
-            .service(echo)
-            .route("/hey", web::get().to(manual_hello))
+            .wrap(logger)
+            .service(push)
+            .route("/ws/", web::get().to(index))
     })
     .bind(("127.0.0.1", 8080))?
     .run()
