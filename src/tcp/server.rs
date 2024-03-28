@@ -54,18 +54,18 @@ pub struct Join {
     pub room_name: String,
 }
 
-pub struct WebSocketServer {
+pub struct Server {
     sessions: HashMap<usize, Recipient<session::Message>>,
     rooms: HashMap<String, HashSet<usize>>,
     rng: ThreadRng,
 }
 
-impl Default for WebSocketServer {
+impl Default for Server {
     fn default() -> Self {
         let mut rooms = HashMap::new();
         rooms.insert("main".to_owned(), HashSet::new());
 
-        WebSocketServer {
+        Server {
             sessions: HashMap::new(),
             rooms,
             rng: rand::thread_rng(),
@@ -73,15 +73,15 @@ impl Default for WebSocketServer {
     }
 }
 
-impl WebSocketServer {
+impl Server {
     fn send_message(&self, room: &str, message: &str, skip_id: usize) {}
 }
 
-impl Actor for WebSocketServer {
+impl Actor for Server {
     type Context = Context<Self>;
 }
 
-impl Handler<Connect> for WebSocketServer {
+impl Handler<Connect> for Server {
     type Result = usize;
 
     fn handle(&mut self, msg: Connect, ctx: &mut Self::Context) -> Self::Result {
@@ -93,7 +93,7 @@ impl Handler<Connect> for WebSocketServer {
     }
 }
 
-impl Handler<Disconnect> for WebSocketServer {
+impl Handler<Disconnect> for Server {
     type Result = ();
 
     fn handle(&mut self, msg: Disconnect, ctx: &mut Self::Context) -> Self::Result {
@@ -102,13 +102,13 @@ impl Handler<Disconnect> for WebSocketServer {
 }
 
 /// Handler for Message message.
-impl Handler<Message> for WebSocketServer {
+impl Handler<Message> for Server {
     type Result = ();
 
     fn handle(&mut self, msg: Message, _: &mut Context<Self>) {}
 }
 
-impl Handler<Join> for WebSocketServer {
+impl Handler<Join> for Server {
     type Result = ();
     fn handle(&mut self, msg: Join, ctx: &mut Self::Context) -> Self::Result {
         let Join {

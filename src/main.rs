@@ -1,5 +1,6 @@
 use std::str::from_utf8;
-mod websocket;
+mod tcp;
+
 use actix::{Actor, StreamHandler};
 use actix_web::{
     get, middleware::Logger, post, web, App, Error, HttpRequest, HttpResponse, HttpServer,
@@ -10,6 +11,8 @@ use actix_web_actors::ws;
 use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+use crate::tcp::tcp_server;
 
 struct MyWs;
 
@@ -65,12 +68,19 @@ async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_BACKTRACE", "1");
     env_logger::init();
 
+    let server = tcp::Server::default().start();
+
+    let srv = server.clone();
+
+    tcp_server("127.0.0.1:12345", srv);
+
     log::info!("Starting HTTP server at http://localhost:8080");
 
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         let logger = Logger::default();
 
         App::new()
+            .app_data(web::Data::new(server.clone()))
             .wrap(logger)
             .service(push)
             .route("/ws/", web::get().to(index))
