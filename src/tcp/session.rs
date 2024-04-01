@@ -94,7 +94,7 @@ impl Actor for Session {
 impl Handler<Message> for Session {
     type Result = ();
 
-    fn handle(&mut self, msg: Message, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: Message, _: &mut Context<Self>) -> Self::Result {
         self.framed.write(ChatResponse::Message(msg.0))
     }
 }

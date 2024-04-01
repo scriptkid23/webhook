@@ -84,11 +84,15 @@ impl Actor for Server {
 impl Handler<Connect> for Server {
     type Result = usize;
 
-    fn handle(&mut self, msg: Connect, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: Connect, _: &mut Context<Self>) -> Self::Result {
         log::info!("Someone joined");
 
-        let id = self.rng.gen::<usize>();
+        self.send_message("main", "Someone joined", 0);
 
+        let id = self.rng.gen::<usize>();
+        self.sessions.insert(id, msg.addr);
+        // auto join session to main room
+        self.rooms.get_mut("main").unwrap().insert(id);
         id
     }
 }

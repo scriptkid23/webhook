@@ -1,56 +1,87 @@
-use std::str::from_utf8;
 mod tcp;
 
-use actix::{Actor, StreamHandler};
+use actix::prelude::*;
 use actix_web::{
-    get, middleware::Logger, post, web, App, Error, HttpRequest, HttpResponse, HttpServer,
-    Responder,
+    middleware::Logger, post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use actix_web_actors::ws;
 
 use log::info;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
+
+use tcp::{Connect, Server};
 
 use crate::tcp::tcp_server;
 
-struct MyWs;
+struct WsChatSession {
+    /// unique session id
+    id: usize,
 
-impl Actor for MyWs {
-    type Context = ws::WebsocketContext<Self>;
+    /// joined room
+    room: String,
+    /// peer name
+    name: Option<String>,
+    /// Chat server
+    addr: Addr<Server>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CustomMessage {
-    pub event: String,
-    pub payload: serde_json::Value,
-}
-
-/// Handler for ws::Message message
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWs {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(ws::Message::Text(text)) => {
-                let msg_bytes = text.clone().into_bytes();
-                match from_utf8(&msg_bytes) {
-                    Ok(s) => {
-                        println!("Result: {}", json!(s));
-                    }
-                    Err(e) => {
-                        println!("Error: {:?}", e);
-                    }
-                }
-                ctx.text(text)
-            }
-
-            _ => (),
-        }
+impl Handler<tcp::SessionMessage> for WsChatSession {
+    type Result = ();
+    fn handle(&mut self, msg: tcp::SessionMessage, ctx: &mut Self::Context) -> Self::Result {
+        ctx.text(msg.0)
     }
 }
 
-async fn index(req: HttpRequest, payload: web::Payload) -> Result<HttpResponse, Error> {
-    let resp = ws::start(MyWs {}, &req, payload);
-    resp
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsChatSession {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        let msg = match msg {
+            Err(_) => {
+                ctx.stop();
+                return;
+            }
+            Ok(msg) => msg,
+        };
+
+        info!("Websocket message: {msg:?}");
+    }
+}
+
+impl Actor for WsChatSession {
+    type Context = ws::WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        let addr = ctx.address();
+        self.addr
+            .send(Connect {
+                addr: addr.recipient(),
+            })
+            .into_actor(self)
+            .then(|res, act, ctx| {
+                match res {
+                    Ok(res) => act.id = res,
+                    // something is wrong with chat server
+                    _ => ctx.stop(),
+                }
+                fut::ready(())
+            })
+            .wait(ctx);
+    }
+}
+
+async fn chat_route(
+    req: HttpRequest,
+    stream: web::Payload,
+    srv: web::Data<Addr<Server>>,
+) -> Result<impl Responder, Error> {
+    ws::start(
+        WsChatSession {
+            id: 0,
+            room: "main".to_owned(),
+            name: None,
+            addr: srv.get_ref().clone(),
+        },
+        &req,
+        stream,
+    )
 }
 
 #[post("/{token}")]
@@ -64,9 +95,7 @@ async fn push(path: web::Path<(String,)>) -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "info");
-    std::env::set_var("RUST_BACKTRACE", "1");
-    env_logger::init();
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     let server = tcp::Server::default().start();
 
@@ -83,7 +112,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(server.clone()))
             .wrap(logger)
             .service(push)
-            .route("/ws/", web::get().to(index))
+            .service(web::resource("/ws").to(chat_route))
     })
     .bind(("127.0.0.1", 8080))?
     .run()
